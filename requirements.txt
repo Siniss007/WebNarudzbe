@@ -1,23 +1,11 @@
-# Web framework
-Flask==3.0.3
-
-# Data handling
-pandas==2.1.1   # koristi verziju koja ima prebuilt wheel za Python 3.13
+flask==3.0.3
+pandas==2.1.1
 openpyxl==3.1.2
-
-# Optional: For Excel/CSV handling
 xlrd==2.0.1
 xlsxwriter==3.1.2
-
-# HTTP requests if needed
 requests==2.31.0
-
-# Environment management
 python-dotenv==1.0.0
-
-# Database connectors
-SQLAlchemy==2.0.26
+sqlalchemy==2.0.26
 psycopg2-binary==2.9.9
-
-# Misc utilities
 numpy==1.26.0
+
