@@ -8,4 +8,4 @@ python-dotenv==1.0.0
 sqlalchemy==2.0.26
 psycopg2-binary==2.9.9
 numpy==1.26.0
-
+gunicorn==22.1.0
