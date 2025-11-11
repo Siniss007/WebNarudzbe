@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Prijava</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f4;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        .login-box {
+            background-color: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.3);
+        }
+        input[type="text"], input[type="password"] {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+        }
+        input[type="submit"] {
+            padding: 10px;
+            width: 100%;
+            background-color: #2E8B57;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        .error {
+            color: red;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-box">
+        <h2>Prijava</h2>
+        {% if error %}
+            <div class="error">{{ error }}</div>
+        {% endif %}
+        <form method="POST">
+            <input type="text" name="username" placeholder="Korisničko ime" required>
+            <input type="password" name="password" placeholder="Lozinka" required>
+            <input type="submit" value="Prijavi se">
+        </form>
+    </div>
+</body>
+</html>
