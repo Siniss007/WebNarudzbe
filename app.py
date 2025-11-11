@@ -1,15 +1,50 @@
-from flask import Flask, render_template, request, redirect
+from flask import Flask, render_template, request, redirect, session, url_for
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 import pandas as pd
 import os
+from functools import wraps
 
 app = Flask(__name__)
 
 # -----------------------
+# LOGIN / AUTH
+# -----------------------
+AUTH_USERNAME = "agromix"
+AUTH_PASSWORD = "agromix007"
+app.secret_key = os.environ.get("SESSION_SECRET", "change_this_secret_in_prod")
+
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get("logged_in"):
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return decorated_function
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if session.get("logged_in"):
+        return redirect(url_for("index"))
+    error = None
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        if username == AUTH_USERNAME and password == AUTH_PASSWORD:
+            session["logged_in"] = True
+            return redirect(url_for("index"))
+        else:
+            error = "Neispravno korisničko ime ili lozinka."
+    return render_template("login.html", error=error)
+
+@app.route("/logout")
+def logout():
+    session.pop("logged_in", None)
+    return redirect(url_for("login"))
+
+# -----------------------
 # Konfiguracija baze (Neon / PostgreSQL)
 # -----------------------
-# Render: postavi env var DATABASE_URL na tvoj Neon connection string
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if DATABASE_URL:
     app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL
@@ -19,7 +54,7 @@ else:
     db = None
 
 # -----------------------
-# Model tabele (samo ako imamo DB)
+# Model tabele (DB)
 # -----------------------
 if db:
     class Narudzba(db.Model):
@@ -34,17 +69,15 @@ if db:
         def __repr__(self):
             return f"<Narudzba {self.kupac} - {self.vrsta}>"
 
-    # Kreiraj tablu ako ne postoji
     with app.app_context():
         db.create_all()
 
 # -----------------------
-# Konfiguracija fajla (Excel fallback)
+# Konfiguracija Excel fajla
 # -----------------------
 FILE_PATH = "narudzbe.xlsx"
 columns = ["Kupac/Farma", "Datum isporuke", "Vrsta hrane", "Količina (kg)", "Napomena"]
 
-# Ako nema DB, učitaj Excel ili ga kreiraj
 if not db:
     if os.path.exists(FILE_PATH):
         df = pd.read_excel(FILE_PATH)
@@ -56,20 +89,14 @@ if not db:
         df = pd.DataFrame(columns=columns)
         df.to_excel(FILE_PATH, index=False)
 else:
-    # Definišemo df varijablu da izbjegnemo KeyError ako se negdje referencira
     df = pd.DataFrame(columns=columns)
 
 # -----------------------
-# Helper: učitavanje podataka u df var (ako treba za templating)
+# Helper i save funkcije (ostaje isto)
 # -----------------------
 def load_data_for_display():
-    """
-    Vrati pandas DataFrame koji koristi template. Ako imamo DB, povuci iz DB.
-    Ako nemamo DB, koristi lokalni Excel df.
-    """
     global df
     if db:
-        # Učitavanje iz baze u pandas DataFrame radi iste templating logike kao prije
         with app.app_context():
             try:
                 q = Narudzba.query.order_by(Narudzba.datum).all()
@@ -84,10 +111,8 @@ def load_data_for_display():
                     })
                 df = pd.DataFrame(rows, columns=columns)
             except Exception:
-                # Ako DB pukne, fallback na prazan DataFrame sa kolonama
                 df = pd.DataFrame(columns=columns)
     else:
-        # df već učitan iz fajla ili inicijalizovan
         if os.path.exists(FILE_PATH):
             df = pd.read_excel(FILE_PATH)
             if "Datum isporuke" in df.columns:
@@ -97,30 +122,16 @@ def load_data_for_display():
         else:
             df = pd.DataFrame(columns=columns)
 
-# -----------------------
-# Funkcije za čuvanje (Excel ili DB)
-# -----------------------
 def save_data_from_df_to_storage():
-    """
-    Ako koristimo DB, upiši df u DB (replace-once). Ako koristimo Excel, upiši u FILE_PATH.
-    Napomena: kad koristimo DB, normalno koristimo ORM operacije umjesto masovnog replace,
-    ali zadržavam jednostavnost: sync df -> DB radi ako treba.
-    """
     global df
     if db:
-        # Sync df u DB: jednostavan način je da obrišemo sve i upišemo iz df (ako dataset nije veliki)
-        # Ali da budemo sigurni, radimo to unutar transakcije i rollback na grešku.
         with app.app_context():
             try:
-                # Obriši sve stare zapise (oprez: ovo briše sve, koristi samo ako želiš "replace" ponašanje)
                 Narudzba.query.delete()
                 db.session.commit()
-                # Insert nove
                 for _, row in df.iterrows():
-                    # row["Datum isporuke"] je datetime.date ili string; normaliziraj
                     datum_val = row["Datum isporuke"]
                     if isinstance(datum_val, str):
-                        # pokuša parseirati oblik dd.mm.yyyy.
                         try:
                             datum_parsed = datetime.strptime(datum_val, "%d.%m.%Y.").date()
                         except Exception:
@@ -139,23 +150,15 @@ def save_data_from_df_to_storage():
             except Exception:
                 db.session.rollback()
     else:
-        # Save to excel, kao prije
         df_to_save = df.copy()
         if "Datum isporuke" in df_to_save.columns:
             df_to_save["Datum isporuke"] = df_to_save["Datum isporuke"].apply(lambda x: x.strftime("%d.%m.%Y.") if not pd.isna(x) else "")
         df_to_save.to_excel(FILE_PATH, index=False)
 
-# -----------------------
-# Helper funkcije za view
-# -----------------------
 def get_orders():
-    """
-    Vrati listu narudžbi formiranu iz df (koji je sinhronizovan sa DB ako DB postoji).
-    """
     load_data_for_display()
     orders = []
     today = datetime.today().date()
-    # Ako nema kolone ili je prazan, vratiti praznu listu
     if df.empty or "Datum isporuke" not in df.columns:
         return []
     df_sorted = df.sort_values(by="Datum isporuke")
@@ -202,15 +205,17 @@ def get_totals():
         return {}
 
 # -----------------------
-# Rute
+# Zaštićene rute dekoratorom login_required
 # -----------------------
 @app.route("/")
+@login_required
 def index():
     orders = get_orders()
     totals = get_totals()
     return render_template("index.html", orders=orders, totals=totals)
 
 @app.route("/add", methods=["POST"])
+@login_required
 def add_order():
     kupac = request.form.get("kupac")
     vrsta = request.form.get("vrsta")
@@ -228,7 +233,6 @@ def add_order():
         return redirect("/")
 
     if db:
-        # Ubaci direktno u DB, sa try/except i rollback
         try:
             novi = Narudzba(
                 kupac=kupac,
@@ -242,7 +246,6 @@ def add_order():
         except Exception:
             db.session.rollback()
     else:
-        # Excel fallback
         global df
         new_order = {
             "Kupac/Farma": kupac,
@@ -253,12 +256,11 @@ def add_order():
         }
         df = pd.concat([df, pd.DataFrame([new_order])], ignore_index=True)
         save_data_from_df_to_storage()
-
     return redirect("/")
 
 @app.route("/delete", methods=["POST"])
+@login_required
 def delete_order():
-    # prvo probaj po id (ako front-end prosledjuje), fallback na kupac
     id_to_delete = request.form.get("id")
     kupac_to_delete = request.form.get("delete")
 
@@ -284,6 +286,7 @@ def delete_order():
     return redirect("/")
 
 @app.route("/mark_done", methods=["POST"])
+@login_required
 def mark_done():
     id_done = request.form.get("id")
     kupac_done = request.form.get("done")
@@ -308,6 +311,7 @@ def mark_done():
     return redirect("/")
 
 @app.route("/edit", methods=["POST"])
+@login_required
 def edit_order():
     id_edit = request.form.get("id_edit")
     kupac_edit = request.form.get("kupac_edit")
@@ -343,7 +347,6 @@ def edit_order():
             vrsta_edit, kolicina_edit_val, datum_obj, napomena_edit
         ]
         save_data_from_df_to_storage()
-
     return redirect("/")
 
 # -----------------------
