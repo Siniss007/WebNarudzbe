@@ -92,26 +92,27 @@ else:
     df = pd.DataFrame(columns=columns)
 
 # -----------------------
-# Helper i save funkcije (ostaje isto)
+# Helper i save funkcije
 # -----------------------
 def load_data_for_display():
     global df
     if db:
         with app.app_context():
             try:
-                q = Narudzba.query.order_by(Narudzba.datum).all()
+                q = Narudzba.query.order_by(Narudzba.id).all()
                 rows = []
                 for n in q:
                     rows.append({
+                        "ID": n.id,
                         "Kupac/Farma": n.kupac,
                         "Datum isporuke": n.datum,
                         "Vrsta hrane": n.vrsta,
                         "Količina (kg)": n.kolicina,
                         "Napomena": n.napomena
                     })
-                df = pd.DataFrame(rows, columns=columns)
+                df = pd.DataFrame(rows, columns=["ID"] + columns)
             except Exception:
-                df = pd.DataFrame(columns=columns)
+                df = pd.DataFrame(columns=["ID"] + columns)
     else:
         if os.path.exists(FILE_PATH):
             df = pd.read_excel(FILE_PATH)
@@ -184,7 +185,9 @@ def get_orders():
             tag = "soon"
         else:
             tag = "normal"
+
         orders.append({
+            "id": row.get("ID", ""),
             "kupac": row.get("Kupac/Farma", ""),
             "datum": datum_obj.strftime("%d.%m.%Y."),
             "vrsta": row.get("Vrsta hrane", ""),
@@ -205,7 +208,7 @@ def get_totals():
         return {}
 
 # -----------------------
-# Zaštićene rute dekoratorom login_required
+# Rute
 # -----------------------
 @app.route("/")
 @login_required
@@ -262,8 +265,6 @@ def add_order():
 @login_required
 def delete_order():
     id_to_delete = request.form.get("id")
-    kupac_to_delete = request.form.get("delete")
-
     if db:
         try:
             if id_to_delete:
@@ -271,25 +272,25 @@ def delete_order():
                 if obj:
                     db.session.delete(obj)
                     db.session.commit()
-            elif kupac_to_delete:
-                obj = Narudzba.query.filter_by(kupac=kupac_to_delete).first()
-                if obj:
-                    db.session.delete(obj)
-                    db.session.commit()
         except Exception:
             db.session.rollback()
     else:
         global df
-        if kupac_to_delete:
-            df = df[df["Kupac/Farma"] != kupac_to_delete]
-            save_data_from_df_to_storage()
+        if id_to_delete:
+            try:
+                id_int = int(id_to_delete)
+                if 0 <= id_int < len(df):
+                    df = df.drop(df.index[id_int])
+                    df.reset_index(drop=True, inplace=True)
+                    save_data_from_df_to_storage()
+            except Exception:
+                pass
     return redirect("/")
 
 @app.route("/mark_done", methods=["POST"])
 @login_required
 def mark_done():
     id_done = request.form.get("id")
-    kupac_done = request.form.get("done")
     if db:
         try:
             if id_done:
@@ -297,17 +298,17 @@ def mark_done():
                 if obj:
                     obj.napomena = "Završeno"
                     db.session.commit()
-            elif kupac_done:
-                obj = Narudzba.query.filter_by(kupac=kupac_done).first()
-                if obj:
-                    obj.napomena = "Završeno"
-                    db.session.commit()
         except Exception:
             db.session.rollback()
     else:
         global df
-        df.loc[df["Kupac/Farma"] == kupac_done, "Napomena"] = "Završeno"
-        save_data_from_df_to_storage()
+        try:
+            id_int = int(id_done)
+            if 0 <= id_int < len(df):
+                df.loc[id_int, "Napomena"] = "Završeno"
+                save_data_from_df_to_storage()
+        except Exception:
+            pass
     return redirect("/")
 
 @app.route("/edit", methods=["POST"])
@@ -330,8 +331,6 @@ def edit_order():
         try:
             if id_edit:
                 obj = Narudzba.query.get(int(id_edit))
-            else:
-                obj = Narudzba.query.filter_by(kupac=kupac_edit).first()
             if obj:
                 obj.kupac = kupac_edit
                 obj.vrsta = vrsta_edit
@@ -343,10 +342,15 @@ def edit_order():
             db.session.rollback()
     else:
         global df
-        df.loc[df["Kupac/Farma"] == kupac_edit, ["Vrsta hrane", "Količina (kg)", "Datum isporuke", "Napomena"]] = [
-            vrsta_edit, kolicina_edit_val, datum_obj, napomena_edit
-        ]
-        save_data_from_df_to_storage()
+        try:
+            id_int = int(id_edit)
+            if 0 <= id_int < len(df):
+                df.loc[id_int, ["Kupac/Farma", "Vrsta hrane", "Količina (kg)", "Datum isporuke", "Napomena"]] = [
+                    kupac_edit, vrsta_edit, kolicina_edit_val, datum_obj, napomena_edit
+                ]
+                save_data_from_df_to_storage()
+        except Exception:
+            pass
     return redirect("/")
 
 # -----------------------
